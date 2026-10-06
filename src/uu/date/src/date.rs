@@ -7,6 +7,7 @@
 // spell-checker:ignore ohos OHOS tzdata tzdb tzif zoneinfo euctw
 
 mod format_modifiers;
+mod local_time;
 mod locale;
 
 use clap::{Arg, ArgAction, Command};
@@ -62,6 +63,28 @@ fn ohos_system_zone() -> jiff::tz::TimeZone {
         }
     }
     jiff::tz::TimeZone::UTC
+}
+
+#[cfg(target_env = "ohos")]
+fn system_zone() -> TimeZone {
+    ohos_system_zone()
+}
+
+#[cfg(not(target_env = "ohos"))]
+fn system_zone() -> TimeZone {
+    TimeZone::system()
+}
+
+fn local_zoned_or_system(timestamp: Timestamp) -> Zoned {
+    local_time::zoned(timestamp)
+}
+
+fn local_zoned_or_utc(timestamp: Timestamp) -> Zoned {
+    local_time::zoned(timestamp)
+}
+
+fn local_now() -> Zoned {
+    local_zoned_or_system(Timestamp::now())
 }
 
 // Options
@@ -414,19 +437,18 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
 
     let utc = matches.get_flag(OPT_UNIVERSAL);
     let debug_mode = matches.get_flag(OPT_DEBUG);
+    let needs_full_zone = matches!(
+        &date_source,
+        DateSource::Human(_) | DateSource::File(_) | DateSource::Stdin
+    ) || matches.get_one::<String>(OPT_SET).is_some();
 
     // Get the current time, either in the local time zone or UTC.
     let now = if utc {
         Timestamp::now().to_zoned(TimeZone::UTC)
+    } else if needs_full_zone {
+        Timestamp::now().to_zoned(system_zone())
     } else {
-        #[cfg(target_env = "ohos")]
-        {
-            Timestamp::now().to_zoned(ohos_system_zone())
-        }
-        #[cfg(not(target_env = "ohos"))]
-        {
-            Zoned::now()
-        }
+        local_now()
     };
 
     let settings = Settings {
@@ -595,19 +617,13 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
                 path: path.quote().to_string(),
                 error: e.to_string(),
             })?;
-            #[cfg(target_env = "ohos")]
-            let date = ts.to_zoned(ohos_system_zone());
-            #[cfg(not(target_env = "ohos"))]
-            let date = ts.to_zoned(TimeZone::try_system().unwrap_or(TimeZone::UTC));
+            let date = local_zoned_or_utc(ts);
             let iter = std::iter::once(Ok(ParsedDateTime::InRange(date)));
             Box::new(iter)
         }
         DateSource::Resolution => {
             let resolution = get_clock_resolution();
-            #[cfg(target_env = "ohos")]
-            let date = resolution.to_zoned(ohos_system_zone());
-            #[cfg(not(target_env = "ohos"))]
-            let date = resolution.to_zoned(TimeZone::system());
+            let date = local_zoned_or_system(resolution);
             let iter = std::iter::once(Ok(ParsedDateTime::InRange(date)));
             Box::new(iter)
         }
