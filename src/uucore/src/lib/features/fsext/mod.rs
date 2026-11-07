@@ -376,9 +376,13 @@ use std::slice;
 pub fn read_fs_list() -> UResult<Vec<MountInfo>> {
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "cygwin"))]
     {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let (file_name, f) = (LINUX_MOUNTINFO, File::open(LINUX_MOUNTINFO)?);
+        #[cfg(target_os = "cygwin")]
         let (file_name, f) = File::open(LINUX_MOUNTINFO)
             .map(|f| (LINUX_MOUNTINFO, f))
             .or_else(|_| File::open(LINUX_MTAB).map(|f| (LINUX_MTAB, f)))?;
+
         let reader = BufReader::new(f);
         Ok(reader
             .split(b'\n')
