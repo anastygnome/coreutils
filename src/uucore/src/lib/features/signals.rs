@@ -723,8 +723,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(unix)]
 static STDIN_WAS_CLOSED: AtomicBool = AtomicBool::new(false);
 #[cfg(unix)]
-static STDOUT_WAS_CLOSED: AtomicBool = AtomicBool::new(false);
-#[cfg(unix)]
 static STDERR_WAS_CLOSED: AtomicBool = AtomicBool::new(false);
 
 // SIGPIPE state capture - captures whether SIGPIPE was ignored at process startup
@@ -756,10 +754,15 @@ pub unsafe extern "C" fn capture_startup_state() {
             libc::fcntl(libc::STDIN_FILENO, libc::F_GETFD) == -1,
             Ordering::Relaxed,
         );
-        STDOUT_WAS_CLOSED.store(
-            libc::fcntl(libc::STDOUT_FILENO, libc::F_GETFD) == -1,
-            Ordering::Relaxed,
-        );
+        if libc::fcntl(libc::STDOUT_FILENO, libc::F_GETFD) == -1 {
+            // open read-only stdout. Then `uucore::io::RawWriter` reports `EBADF`
+            // Don't use `/dev/null` since `std` crushes when `/dev` is not mounted and stdout was closed.
+            let mut pipefd = [-1; 2];
+            if libc::pipe(pipefd.as_mut_ptr()) == 0 {
+                // if it failed, or fd is incorrect by strange reason, std should open `/dev/null`
+                libc::close(pipefd[1]);
+            }
+        }
         STDERR_WAS_CLOSED.store(
             libc::fcntl(libc::STDERR_FILENO, libc::F_GETFD) == -1,
             Ordering::Relaxed,
@@ -808,16 +811,6 @@ pub fn stdin_was_closed() -> bool {
 
 #[cfg(not(unix))]
 pub const fn stdin_was_closed() -> bool {
-    false
-}
-
-#[cfg(unix)]
-pub fn stdout_was_closed() -> bool {
-    STDOUT_WAS_CLOSED.load(Ordering::Relaxed)
-}
-
-#[cfg(not(unix))]
-pub const fn stdout_was_closed() -> bool {
     false
 }
 
